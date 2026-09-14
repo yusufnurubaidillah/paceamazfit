@@ -22,160 +22,176 @@ jobs:
       - name: 3. Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: 4. Build APK Smartwatch (Otomatis & Kompatibel)
+      - name: 4. Setup Gradle 7.5.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '7.5.1'
+
+      - name: 5. Siapkan Proyek Android & Build APK
         run: |
-          set -e
-          # Jika ada file zip yang diunggah, ekstrak otomatis
-          if ls *.zip 1> /dev/null 2>&1; then
-            echo "Mengekstrak file zip..."
-            unzip -o *.zip || true
-          fi
+          node -e '
+          const fs = require("fs");
+          const path = require("path");
+          const { execSync } = require("child_process");
 
-          # Jika file ada di dalam subfolder, masuk ke foldernya
-          if [ ! -f "settings.gradle" ] && [ -f */settings.gradle ]; then
-            cd */
-          fi
-
-          # Jika proyek Android belum ada, buat otomatis wrapper Android 5.1
-          if [ ! -f "settings.gradle" ]; then
-            echo "Membuat kerangka Android 5.1 otomatis..."
-            mkdir -p app/src/main/assets/www
-            mkdir -p app/src/main/java/com/amazfit/remindersholat/jepara
-            mkdir -p app/src/main/res/values
-
-            if [ -d "www" ]; then
-              cp -r www/* app/src/main/assets/www/ || true
-            else
-              find . -maxdepth 2 \( -name "*.html" -o -name "*.js" -o -name "*.css" -o -name "*.png" -o -name "*.jpg" \) -exec cp {} app/src/main/assets/www/ \; || true
-            fi
-
-            echo "include ':app'" > settings.gradle
-
-            cat << 'EOF' > build.gradle
-            buildscript {
-                repositories {
-                    google()
-                    mavenCentral()
-                }
-                dependencies {
-                    classpath 'com.android.tools.build:gradle:7.4.2'
-                }
+          // 1. Ekstrak file zip jika ada
+          for (const f of fs.readdirSync(".")) {
+            if (f.endsWith(".zip")) {
+              try { execSync(`unzip -o "${f}"`); } catch(e){}
             }
-            allprojects {
-                repositories {
-                    google()
-                    mavenCentral()
-                }
+          }
+
+          // 2. Jika file ada di dalam subfolder, pindahkan ke root
+          if (!fs.existsSync("settings.gradle")) {
+            for (const f of fs.readdirSync(".")) {
+              if (fs.statSync(f).isDirectory() && fs.existsSync(path.join(f, "settings.gradle"))) {
+                execSync(`cp -r ${f}/* . 2>/dev/null || true`);
+                break;
+              }
             }
-            EOF
+          }
 
-            cat << 'EOF' > app/build.gradle
-            plugins {
-                id 'com.android.application'
+          // 3. Jika belum ada proyek Android, buat kerangka Android 5.1 otomatis
+          if (!fs.existsSync("settings.gradle")) {
+            fs.mkdirSync("app/src/main/assets/www", { recursive: true });
+            fs.mkdirSync("app/src/main/java/com/amazfit/remindersholat/jepara", { recursive: true });
+
+            const copyDir = (src, dest) => {
+              if (!fs.existsSync(src)) return;
+              for (const item of fs.readdirSync(src)) {
+                const s = path.join(src, item);
+                const d = path.join(dest, item);
+                if (fs.statSync(s).isDirectory()) {
+                  fs.mkdirSync(d, { recursive: true });
+                  copyDir(s, d);
+                } else {
+                  fs.copyFileSync(s, d);
+                }
+              }
+            };
+
+            if (fs.existsSync("www")) copyDir("www", "app/src/main/assets/www");
+            for (const f of fs.readdirSync(".")) {
+              if ([".html", ".js", ".css", ".png", ".jpg"].includes(path.extname(f).toLowerCase())) {
+                fs.copyFileSync(f, path.join("app/src/main/assets/www", f));
+              }
             }
-            android {
-                namespace 'com.amazfit.remindersholat.jepara'
-                compileSdk 33
-                defaultConfig {
-                    applicationId "com.amazfit.remindersholat.jepara"
-                    minSdk 21
-                    targetSdk 22
-                    versionCode 1
-                    versionName "1.0.0"
-                }
-                buildTypes {
-                    debug {
-                        debuggable true
-                    }
-                }
-            }
-            EOF
 
-            cat << 'EOF' > app/src/main/AndroidManifest.xml
-            <?xml version="1.0" encoding="utf-8"?>
-            <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-                <uses-permission android:name="android.permission.WAKE_LOCK" />
-                <uses-permission android:name="android.permission.VIBRATE" />
-                <application
-                    android:allowBackup="true"
-                    android:icon="@android:drawable/sym_def_app_icon"
-                    android:label="Reminder Sholat Jepara"
-                    android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
-                    <activity
-                        android:name=".MainActivity"
-                        android:exported="true"
-                        android:screenOrientation="portrait">
-                        <intent-filter>
-                            <action android:name="android.intent.action.MAIN" />
-                            <category android:name="android.intent.category.LAUNCHER" />
-                        </intent-filter>
-                    </activity>
-                </application>
-            </manifest>
-            EOF
+            fs.writeFileSync("settings.gradle", "include \":app\"\n");
 
-            cat << 'EOF' > app/src/main/java/com/amazfit/remindersholat/jepara/MainActivity.java
-            package com.amazfit.remindersholat.jepara;
+            fs.writeFileSync("build.gradle", `buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath "com.android.tools.build:gradle:7.4.2"
+    }
+}
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+`);
 
-            import android.app.Activity;
-            import android.os.Bundle;
-            import android.view.View;
-            import android.view.WindowManager;
-            import android.webkit.WebSettings;
-            import android.webkit.WebView;
-            import android.webkit.WebViewClient;
+            fs.writeFileSync("app/build.gradle", `plugins {
+    id "com.android.application"
+}
+android {
+    namespace "com.amazfit.remindersholat.jepara"
+    compileSdk 33
+    defaultConfig {
+        applicationId "com.amazfit.remindersholat.jepara"
+        minSdk 21
+        targetSdk 22
+        versionCode 1
+        versionName "1.0.0"
+    }
+    buildTypes {
+        debug {
+            debuggable true
+        }
+    }
+}
+`);
 
-            public class MainActivity extends Activity {
-                private WebView mWebView;
+            fs.writeFileSync("app/src/main/AndroidManifest.xml", `<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <application
+        android:allowBackup="true"
+        android:icon="@android:drawable/sym_def_app_icon"
+        android:label="Reminder Sholat Jepara"
+        android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:screenOrientation="portrait">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>`);
 
-                @Override
-                protected void onCreate(Bundle savedInstanceState) {
-                    super.onCreate(savedInstanceState);
-                    getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-                    getWindow().getDecorView().setSystemUiVisibility(
-                        View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                        | View.SYSTEM_UI_FLAG_FULLSCREEN
-                        | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                    );
+            fs.writeFileSync("app/src/main/java/com/amazfit/remindersholat/jepara/MainActivity.java", `package com.amazfit.remindersholat.jepara;
+import android.app.Activity;
+import android.os.Bundle;
+import android.view.View;
+import android.view.WindowManager;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
 
-                    mWebView = new WebView(this);
-                    mWebView.setBackgroundColor(0xFF000000);
-                    WebSettings settings = mWebView.getSettings();
-                    settings.setJavaScriptEnabled(true);
-                    settings.setDomStorageEnabled(true);
-                    settings.setAllowFileAccess(true);
-                    settings.setAllowFileAccessFromFileURLs(true);
-                    settings.setAllowUniversalAccessFromFileURLs(true);
+public class MainActivity extends Activity {
+    private WebView mWebView;
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        getWindow().getDecorView().setSystemUiVisibility(
+            View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+            | View.SYSTEM_UI_FLAG_FULLSCREEN
+            | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+        );
+        mWebView = new WebView(this);
+        mWebView.setBackgroundColor(0xFF000000);
+        WebSettings settings = mWebView.getSettings();
+        settings.setJavaScriptEnabled(true);
+        settings.setDomStorageEnabled(true);
+        settings.setAllowFileAccess(true);
+        settings.setAllowFileAccessFromFileURLs(true);
+        settings.setAllowUniversalAccessFromFileURLs(true);
+        mWebView.setWebViewClient(new WebViewClient());
+        mWebView.loadUrl("file:///android_asset/www/index.html");
+        setContentView(mWebView);
+    }
+    @Override
+    public void onBackPressed() {
+        if (mWebView != null && mWebView.canGoBack()) {
+            mWebView.goBack();
+        } else {
+            super.onBackPressed();
+        }
+    }
+}`);
+          }
+          '
 
-                    mWebView.setWebViewClient(new WebViewClient());
-                    mWebView.loadUrl("file:///android_asset/www/index.html");
-                    setContentView(mWebView);
-                }
-
-                @Override
-                public void onBackPressed() {
-                    if (mWebView != null && mWebView.canGoBack()) {
-                        mWebView.goBack();
-                    } else {
-                        super.onBackPressed();
-                    }
-                }
-            }
-            EOF
-          fi
-
-          echo "Merakit APK..."
+          # Compile APK dengan Gradle
           if [ -f "./gradlew" ]; then
             chmod +x gradlew
             ./gradlew assembleDebug --stacktrace
           else
-            gradle wrapper --gradle-version 7.5.1 || true
-            chmod +x gradlew || true
-            ./gradlew assembleDebug --stacktrace || gradle assembleDebug --stacktrace
+            gradle assembleDebug --stacktrace
           fi
 
-      - name: 5. Simpan Hasil File APK (Siap Unduh)
+      - name: 6. Simpan File APK (Siap Unduh)
         uses: actions/upload-artifact@v4
         with:
           name: AmazfitPace-Reminder-Sholat-Jepara-APK
