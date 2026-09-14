@@ -27,32 +27,297 @@ jobs:
         with:
           gradle-version: '7.5.1'
 
-      - name: 5. Persiapkan Proyek Android
+      - name: 5. Persiapkan Proyek Lengkap Android Amazfit
         run: |
           set -e
+          echo "=== 1. Mengecek atau mengekstrak file jika ada ==="
           if ls *.zip 1> /dev/null 2>&1; then
             unzip -o *.zip || true
           fi
           if [ ! -f "settings.gradle" ] && [ -f */settings.gradle ]; then
             cp -r */* . || true
           fi
-          if [ -f "build.gradle" ]; then
-            sed -i "s/3.4.2/7.4.2/g" build.gradle || true
-            sed -i "s/3.5.3/7.4.2/g" build.gradle || true
-          fi
-          if [ -f "app/build.gradle" ]; then
-            sed -i "s/compileSdkVersion 22/compileSdkVersion 33/g" app/build.gradle || true
-            sed -i "s/buildToolsVersion.*/buildToolsVersion \"33.0.2\"/g" app/build.gradle || true
+
+          echo "=== 2. Membuat kerangka proyek jika repositori masih kosong ==="
+          if [ ! -f "settings.gradle" ] || [ ! -f "app/build.gradle" ]; then
+            mkdir -p app/src/main/java/com/amazfit/remindersholat/jepara
+            mkdir -p app/src/main/assets/www
+            mkdir -p app/src/main/res/values
+
+            # settings.gradle
+            echo 'include ":app"' > settings.gradle
+
+            # root build.gradle
+            cat << 'EOF' > build.gradle
+          buildscript {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+              dependencies {
+                  classpath 'com.android.tools.build:gradle:7.4.2'
+              }
+          }
+          allprojects {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          EOF
+
+            # app/build.gradle
+            cat << 'EOF' > app/build.gradle
+          plugins {
+              id 'com.android.application'
+          }
+          android {
+              namespace 'com.amazfit.remindersholat.jepara'
+              compileSdk 33
+              defaultConfig {
+                  applicationId "com.amazfit.remindersholat.jepara"
+                  minSdk 21
+                  targetSdk 22
+                  versionCode 1
+                  versionName "1.0.0"
+              }
+              buildTypes {
+                  debug {
+                      debuggable true
+                  }
+              }
+          }
+          EOF
+
+            # AndroidManifest.xml
+            cat << 'EOF' > app/src/main/AndroidManifest.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.WAKE_LOCK" />
+              <uses-permission android:name="android.permission.VIBRATE" />
+              <application
+                  android:allowBackup="true"
+                  android:icon="@android:drawable/sym_def_app_icon"
+                  android:label="Jadwal Sholat Jepara"
+                  android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:screenOrientation="portrait">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+            # MainActivity.java (Khusus layar bulat Amazfit Pace & hemat baterai)
+            cat << 'EOF' > app/src/main/java/com/amazfit/remindersholat/jepara/MainActivity.java
+          package com.amazfit.remindersholat.jepara;
+
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.view.View;
+          import android.view.WindowManager;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+
+          public class MainActivity extends Activity {
+              private WebView mWebView;
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                  getWindow().getDecorView().setSystemUiVisibility(
+                      View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                      | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                      | View.SYSTEM_UI_FLAG_FULLSCREEN
+                      | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                  );
+
+                  mWebView = new WebView(this);
+                  mWebView.setBackgroundColor(0xFF000000);
+                  WebSettings settings = mWebView.getSettings();
+                  settings.setJavaScriptEnabled(true);
+                  settings.setDomStorageEnabled(true);
+                  settings.setAllowFileAccess(true);
+                  settings.setAllowFileAccessFromFileURLs(true);
+                  settings.setAllowUniversalAccessFromFileURLs(true);
+                  mWebView.setWebViewClient(new WebViewClient());
+                  mWebView.loadUrl("file:///android_asset/www/index.html");
+                  setContentView(mWebView);
+              }
+
+              @Override
+              public void onBackPressed() {
+                  if (mWebView != null && mWebView.canGoBack()) {
+                      mWebView.goBack();
+                  } else {
+                      super.onBackPressed();
+                  }
+              }
+          }
+          EOF
+
+            # Tampilan Antarmuka Khusus Amazfit Layar Bulat (app/src/main/assets/www/index.html)
+            cat << 'EOF' > app/src/main/assets/www/index.html
+          <!DOCTYPE html>
+          <html lang="id">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+            <title>Sholat Jepara</title>
+            <style>
+              * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+              body {
+                background: #000;
+                color: #fff;
+                font-family: sans-serif;
+                width: 320px;
+                height: 320px;
+                border-radius: 50%;
+                overflow: hidden;
+                margin: auto;
+                position: absolute;
+                top: 0; bottom: 0; left: 0; right: 0;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                text-align: center;
+              }
+              .city { font-size: 11px; color: #10b981; font-weight: bold; letter-spacing: 1px; }
+              .time { font-size: 34px; font-weight: bold; margin: 2px 0; color: #fff; font-family: monospace; }
+              .next-label { font-size: 10px; color: #9ca3af; text-transform: uppercase; }
+              .next-name { font-size: 16px; color: #38bdf8; font-weight: bold; }
+              .next-count { font-size: 13px; color: #fbbf24; margin-top: 1px; font-family: monospace; }
+              .list {
+                width: 80%;
+                margin-top: 8px;
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 4px;
+                font-size: 11px;
+              }
+              .item { background: #111827; padding: 3px 6px; border-radius: 6px; display: flex; justify-content: space-between; }
+              .item span { color: #9ca3af; }
+              .item b { color: #f3f4f6; }
+            </style>
+          </head>
+          <body>
+            <div class="city">JEPARA, JAWA TENGAH</div>
+            <div class="time" id="clock">00:00:00</div>
+            <div class="next-label">Menuju Sholat Berikutnya</div>
+            <div class="next-name" id="nextName">-</div>
+            <div class="next-count" id="countdown">--:--:--</div>
+
+            <div class="list">
+              <div class="item"><span>Subuh</span><b id="tSubuh">04:30</b></div>
+              <div class="item"><span>Dzuhur</span><b id="tDzuhur">11:50</b></div>
+              <div class="item"><span>Ashar</span><b id="tAshar">15:05</b></div>
+              <div class="item"><span>Maghrib</span><b id="tMaghrib">17:55</b></div>
+            </div>
+
+            <script>
+              const LAT = -6.5888;
+              const LNG = 110.6684;
+              const TIMEZONE = 7;
+
+              function getPrayerTimes() {
+                const now = new Date();
+                const year = now.getFullYear();
+                const start = new Date(year, 0, 0);
+                const diff = now - start;
+                const dayOfYear = Math.floor(diff / (1000 * 60 * 60 * 24));
+                const b = (2 * Math.PI * (dayOfYear - 81)) / 365;
+                const eot = 9.87 * Math.sin(2 * b) - 7.53 * Math.cos(b) - 1.5 * Math.sin(b);
+                const decl = 23.45 * Math.sin((2 * Math.PI / 365) * (dayOfYear - 81)) * (Math.PI / 180);
+                const latRad = LAT * (Math.PI / 180);
+                const noon = 12 + (TIMEZONE * 15 - LNG) / 15 - (eot / 60);
+
+                function hourAngle(alt) {
+                  const altRad = alt * (Math.PI / 180);
+                  const cosHA = (Math.sin(altRad) - Math.sin(latRad) * Math.sin(decl)) / (Math.cos(latRad) * Math.cos(decl));
+                  return Math.acos(Math.max(-1, Math.min(1, cosHA))) * (180 / Math.PI) / 15;
+                }
+
+                const subuhHA = hourAngle(-20);
+                const asharAlt = Math.atan(1 / (1 + Math.tan(Math.abs(latRad - decl)))) * (180 / Math.PI);
+                const asharHA = hourAngle(asharAlt);
+                const maghribHA = hourAngle(-0.833);
+
+                function fmt(dec) {
+                  dec = (dec + 24) % 24;
+                  const h = Math.floor(dec);
+                  const m = Math.floor((dec - h) * 60);
+                  return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+                }
+
+                return {
+                  Subuh: fmt(noon - subuhHA),
+                  Dzuhur: fmt(noon + 2/60),
+                  Ashar: fmt(noon + asharHA),
+                  Maghrib: fmt(noon + maghribHA),
+                  Isya: fmt(noon + hourAngle(-18))
+                };
+              }
+
+              function update() {
+                const now = new Date();
+                document.getElementById('clock').innerText = now.toTimeString().split(' ')[0];
+                const times = getPrayerTimes();
+                document.getElementById('tSubuh').innerText = times.Subuh;
+                document.getElementById('tDzuhur').innerText = times.Dzuhur;
+                document.getElementById('tAshar').innerText = times.Ashar;
+                document.getElementById('tMaghrib').innerText = times.Maghrib;
+
+                const curMin = now.getHours() * 60 + now.getMinutes();
+                const curSec = now.getSeconds();
+                const list = [
+                  { name: 'Subuh', time: times.Subuh },
+                  { name: 'Dzuhur', time: times.Dzuhur },
+                  { name: 'Ashar', time: times.Ashar },
+                  { name: 'Maghrib', time: times.Maghrib },
+                  { name: 'Isya', time: times.Isya }
+                ];
+
+                let next = null;
+                for (const item of list) {
+                  const [h, m] = item.time.split(':').map(Number);
+                  const pMin = h * 60 + m;
+                  if (pMin * 60 > curMin * 60 + curSec) {
+                    next = { ...item, diff: (pMin * 60) - (curMin * 60 + curSec) };
+                    break;
+                  }
+                }
+                if (!next) {
+                  const [h, m] = list[0].time.split(':').map(Number);
+                  const pMin = h * 60 + m + (24 * 60);
+                  next = { ...list[0], diff: (pMin * 60) - (curMin * 60 + curSec) };
+                }
+
+                document.getElementById('nextName').innerText = next.name + ' (' + next.time + ')';
+                const rh = Math.floor(next.diff / 3600);
+                const rm = Math.floor((next.diff % 3600) / 60);
+                const rs = next.diff % 60;
+                document.getElementById('countdown').innerText = '-' + String(rh).padStart(2,'0') + ':' + String(rm).padStart(2,'0') + ':' + String(rs).padStart(2,'0');
+              }
+              setInterval(update, 1000);
+              update();
+            </script>
+          </body>
+          </html>
+          EOF
+
           fi
 
       - name: 6. Kompilasi APK Android 5.1
         run: |
-          chmod +x gradlew 2>/dev/null || true
-          if [ -f "./gradlew" ]; then
-            ./gradlew assembleDebug --stacktrace
-          else
-            gradle assembleDebug --stacktrace
-          fi
+          gradle assembleDebug --stacktrace
 
       - name: 7. Simpan File APK (Siap Unduh)
         uses: actions/upload-artifact@v4
